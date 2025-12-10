@@ -1,0 +1,5 @@
+{
+  "name": "The Infinite Lab",
+  "description": "An AI-powered physics simulator that generates interactive 3D scenarios and mathematical explanations on the fly using Gemini and React Three Fiber.",
+  "requestFramePermissions": []
+}
