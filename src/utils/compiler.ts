@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React from 'react';
 import * as THREE from 'three';
 import * as Fiber from '@react-three/fiber';
 import * as Drei from '@react-three/drei';
@@ -18,7 +18,7 @@ export const compileComponent = (
   try {
     let cleanBody = codeBody.trim();
 
-    // 1. Aggressively remove Import statements (Global regex, case insensitive, multiline support)
+    // 1. Aggressively remove Import statements
     cleanBody = cleanBody.replace(/^\s*import\s+[\s\S]*?;\s*$/gm, '');
     cleanBody = cleanBody.replace(/^\s*import\s+.*$/gm, '');
 
@@ -54,16 +54,17 @@ export const compileComponent = (
       returnStatement = `return DynamicComponent;`;
     }
 
-    // 3. Transpile JSX/ES6 to ES5 using Babel Standalone
+    // 3. Transpile JSX/TSX to ES5 using Babel Standalone
     if (!window.Babel) {
-      throw new Error("Babel not loaded");
+      throw new Error("Babel not loaded. Please ensure Babel is included in index.html");
     }
 
     let transformed;
     try {
       transformed = window.Babel.transform(sourceCode, {
-        presets: ['react', 'env'],
-        filename: 'dynamic.js',
+        // FIX: Added 'typescript' preset to handle .tsx generics like useRef<Type>
+        presets: ['react', 'env', 'typescript'], 
+        filename: 'dynamic.tsx', // FIX: .tsx extension triggers TS parsing
         compact: false,
       }).code;
     } catch (babelErr) {
@@ -80,7 +81,7 @@ export const compileComponent = (
       'useThree',
       'useLoader',
       'drei',
-      'drive', 
+      'drive',
       'leva',
       'ReactThreeFiber',
       'Matter',
@@ -91,11 +92,11 @@ export const compileComponent = (
       // Inject Leva Hooks into Top-Level Scope
       const { useControls, button, folder, monitor } = leva;
 
-      // Inject Common Drei Components into Top-Level Scope (FIX FOR HTML ERROR)
+      // Inject Common Drei Components into Top-Level Scope
       const { 
         Html, Text, Text3D, Float, Center, 
         OrbitControls, Environment, ContactShadows, 
-        PerspectiveCamera, OrthographicCamera 
+        PerspectiveCamera, OrthographicCamera, Grid 
       } = drei;
       
       ${transformed}
