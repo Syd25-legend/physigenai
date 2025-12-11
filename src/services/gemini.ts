@@ -118,7 +118,7 @@ export const generateSimulation = async (userPrompt: string): Promise<Simulation
   // Check Vault
   const lowerPrompt = userPrompt.toLowerCase().trim();
   const vaultMatch = Object.keys(PERFECT_SIMULATIONS).find(key => lowerPrompt.includes(key));
-  
+
   if (vaultMatch) {
     console.log("Vault Hit!", vaultMatch);
     return {
@@ -135,7 +135,7 @@ export const generateSimulation = async (userPrompt: string): Promise<Simulation
 
   try {
     // RESEARCH PHASE
-    const researchResponse = await ai.models.generateContent({ 
+    const researchResponse = await ai.models.generateContent({
       model: "gemini-2.5-flash", // UPDATED: Stable model to avoid 429
       contents: `Topic: "${userPrompt}". Task: Physics simulation parameters. Return brief key values (masses, formulas) only.`,
       config: { tools: [{ googleSearch: {} }], temperature: 0.1 }
@@ -151,7 +151,7 @@ export const generateSimulation = async (userPrompt: string): Promise<Simulation
     const augmentedPrompt = `USER SCENARIO: "${userPrompt}"\nRESEARCH NOTES:\n${researchText}\nGenerate the React Three Fiber simulation JSON. Ensure visible objects, proper lighting, and Leva controls.`;
 
     const codeResponse = await ai.models.generateContent({
-      model: "gemini-2.5-pro", // UPDATED: Stable model to avoid 429
+      model: "gemini-2.5-flash", // UPDATED: Stable model to avoid 429
       contents: augmentedPrompt,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
@@ -162,7 +162,7 @@ export const generateSimulation = async (userPrompt: string): Promise<Simulation
 
     const text = codeResponse.text;
     if (!text) throw new Error("No response from Gemini");
-    
+
     const json = JSON.parse(text) as SimulationResponse;
     const finalResult = { ...json, sources };
 
