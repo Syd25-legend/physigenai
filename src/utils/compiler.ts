@@ -7,7 +7,6 @@ import * as Matter from 'matter-js';
 
 /**
  * Transpiles and evaluates a string of React code into a usable Component.
- * 
  * @param codeBody The body of the functional component (hooks + return statement).
  * @param overrides Optional dictionary of hooks/functions to override in the component scope.
  * @returns A React Functional Component.
@@ -19,67 +18,105 @@ export const compileComponent = (
   try {
     let cleanBody = codeBody.trim();
 
-    // SANITIZATION:
-    // The AI sometimes ignores instructions and generates a full "export default function App() { ... }" module.
-    // We need to strip this wrapper to get the raw hooks/JSX body.
-    if (cleanBody.includes('export default function')) {
-      // Remove the export statement line
-      cleanBody = cleanBody.replace(/export\s+default\s+function\s+[\w]+\s*\([^\)]*\)\s*\{/, '');
-      // Remove the last closing brace of the file.
-      // NOTE: We only remove the last character if it is a brace, to avoid breaking helper functions.
-      // Ideally, the AI should not define helper functions outside the main component if using "export default", 
-      // but if it does, this simplistic strip might break. 
-      // However, for single-component outputs (requested), this works.
-      cleanBody = cleanBody.replace(/\}\s*$/, '');
-    }
+    // 1. Aggressively remove Import statements (Global regex, case insensitive, multiline support)
+    //    Matches "import ... from ...;" or "import ...;"
+    cleanBody = cleanBody.replace(/^\s*import\s+[\s\S]*?;\s*$/gm, '');
+    //    Fallback for imports without semicolons at end of line
+    cleanBody = cleanBody.replace(/^\s*import\s+.*$/gm, '');
+
+    // 2. Determine Compilation Strategy
+    //    Strategy A: Full Module (The AI output a complete file with "export default")
+    //    Strategy B: Hook Body (The AI output just the inside of a component)
     
-    // Remove any 'import' statements if present (AI sometimes adds them despite instructions)
-    cleanBody = cleanBody.replace(/^import\s+.*$/gm, '');
+    let sourceCode = '';
+    let returnStatement = '';
+    
+    const hasExportDefault = /export\s+default\s+/.test(cleanBody);
 
-    // 1. Wrap the body in a functional component definition.
-    // Note: We do NOT include the return statement in the source passed to Babel.
-    // Babel treats top-level returns as errors if it parses as a module.
-    const sourceCode = `
-      const DynamicComponent = (props) => {
-        ${cleanBody}
-      };
-    `;
+    if (hasExportDefault) {
+      // STRATEGY A: Handle Full Module
+      // We want to execute this code in the function scope, NOT wrapped in another component.
+      
+      // Check for: "export default function Name"
+      const funcMatch = cleanBody.match(/export\s+default\s+function\s+([a-zA-Z0-9_]+)/);
+      // Check for: "export default Name" (where Name is defined earlier)
+      const varMatch = cleanBody.match(/export\s+default\s+([a-zA-Z0-9_]+)/);
+      
+      if (funcMatch) {
+        // Replace "export default function Foo" with "function Foo"
+        cleanBody = cleanBody.replace(/export\s+default\s+function/, 'function');
+        returnStatement = `return ${funcMatch[1]};`;
+      } else if (varMatch) {
+        // Replace "export default Foo" with empty string (Foo is already defined)
+        cleanBody = cleanBody.replace(/export\s+default\s+[a-zA-Z0-9_]+;?/, '');
+        returnStatement = `return ${varMatch[1]};`;
+      } else {
+        // Anonymous export: "export default () => {}" -> "const DynamicComponent = () => {}"
+        cleanBody = cleanBody.replace(/export\s+default\s+/, 'const DynamicComponent = ');
+        returnStatement = `return DynamicComponent;`;
+      }
+      
+      sourceCode = cleanBody;
+    } else {
+      // STRATEGY B: Handle Body Only
+      // Wrap the loose code in a component function
+      sourceCode = `
+        const DynamicComponent = (props) => {
+          ${cleanBody}
+        };
+      `;
+      returnStatement = `return DynamicComponent;`;
+    }
 
-    // 2. Transpile JSX/ES6 to ES5 using Babel Standalone
+    // 3. Transpile JSX/ES6 to ES5 using Babel Standalone
     if (!window.Babel) {
       throw new Error("Babel not loaded");
     }
 
-    const transformed = window.Babel.transform(sourceCode, {
-      presets: ['react', 'env'],
-      filename: 'dynamic.js',
-    }).code;
+    // We must try-catch the transform separately to identify syntax errors in generation
+    let transformed;
+    try {
+      transformed = window.Babel.transform(sourceCode, {
+        presets: ['react', 'env'],
+        filename: 'dynamic.js',
+        compact: false, // Easier debugging
+      }).code;
+    } catch (babelErr) {
+      console.error("Babel Transform Failed on:", sourceCode);
+      throw babelErr;
+    }
 
-    // 3. Create a Function that returns the component.
-    //    We inject dependencies as arguments to this function wrapper.
+    // 4. Create a Function that returns the component.
+    //    We explicitly destructure global hooks so the AI code (which assumes global scope or named imports) works.
     const createComponent = new Function(
       'React',
       'THREE',
-      'three', // Alias for THREE (lowercase) to be forgiving
+      'three', 
       'useFrame',
       'useThree',
       'useLoader',
       'drei',
-      'drive', // Inject 'drive' as alias for 'drei'
+      'drive', 
       'leva',
-      'ReactThreeFiber', // Inject ReactThreeFiber as a global to prevent ReferenceErrors
-      'Matter', // Inject Matter.js for 2D physics
+      'ReactThreeFiber',
+      'Matter',
       `
-      const { useState, useEffect, useRef, useMemo, useCallback } = React;
+      // Inject React Hooks into Top-Level Scope
+      const { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect, useReducer } = React;
+      
+      // Inject Leva Hooks into Top-Level Scope
+      const { useControls, button, folder, monitor } = leva;
+      
       ${transformed}
-      return DynamicComponent;
+      
+      ${returnStatement}
       `
     );
 
-    // Ensure we have the correct Matter object (handle ESM default export)
+    // Ensure we have the correct Matter object
     const safeMatter = (Matter as any).default || Matter;
 
-    // 4. Execute the creator function with the actual dependencies.
+    // 5. Execute the creator function
     const Component = createComponent(
       React,
       THREE,
