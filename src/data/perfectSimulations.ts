@@ -1925,5 +1925,816 @@ return (
   </group>
 );
 `
+  },
+
+"gravitron": {
+    title: "The Gravitron (Carnival Physics)",
+    explanation: "Experience circular motion! As the ride spins, the wall pushes you in (Normal Force). If fast enough, friction ($f = \\mu N$) overcomes gravity, and you stick to the wall when the floor drops.",
+    componentCode: `
+const { speed, floorDrop, friction } = useControls({
+  speed: { value: 1, min: 0, max: 5, label: "Spin Speed" },
+  floorDrop: { value: false, label: "Drop Floor!" },
+  friction: { value: 0.5, min: 0.1, max: 1.0, label: "Wall Friction" }
+});
+
+const rider = useRef({ y: 1, velY: 0 });
+const group = useRef();
+const riderMesh = useRef();
+const floorMesh = useRef();
+
+useFrame((state, dt) => {
+  const t = state.clock.elapsedTime;
+  const angularVel = speed * 2;
+  const radius = 4;
+  const g = 9.8;
+  
+  // Rotate the whole room
+  if (group.current) group.current.rotation.y = -t * angularVel;
+  
+  // Physics Calculation
+  const centripetalAccel = angularVel * angularVel * radius;
+  const normalForce = centripetalAccel; // Mass = 1
+  const maxFriction = normalForce * friction;
+  
+  // Vertical Motion
+  let accelY = -g;
+  
+  // If touching wall (which is always true in this setup), friction acts up
+  if (maxFriction >= g) {
+     // Static friction is enough to hold against gravity
+     accelY = 0; 
+     rider.current.velY = 0;
+  } else {
+     // Kinetic friction slows the fall
+     accelY = -g + maxFriction;
+  }
+  
+  // Floor constraint
+  const floorLevel = floorDrop ? -5 : 0;
+  
+  if (rider.current.y > floorLevel) {
+     rider.current.velY += accelY * dt;
+     rider.current.y += rider.current.velY * dt;
+  } else {
+     rider.current.y = floorLevel;
+     rider.current.velY = 0;
+  }
+  
+  // Update Rider Visuals
+  if (riderMesh.current) {
+     riderMesh.current.position.set(4, rider.current.y + 1, 0); // Stuck to wall at x=4
+  }
+  
+  if (floorMesh.current) {
+     floorMesh.current.position.y = floorLevel;
+  }
+});
+
+return (
+  <group>
+    {/* Spinning Room Container */}
+    <group ref={group}>
+       {/* Wall segments */}
+       {Array.from({length: 8}).map((_, i) => (
+          <mesh key={i} position={[Math.cos(i/8*Math.PI*2)*4.2, 0, Math.sin(i/8*Math.PI*2)*4.2]} rotation={[0, -i/8*Math.PI*2, 0]}>
+             <boxGeometry args={[0.5, 12, 3.5]} />
+             <meshStandardMaterial color={i%2===0 ? "#ef4444" : "#facc15"} />
+          </mesh>
+       ))}
+       
+       {/* The Rider */}
+       <mesh ref={riderMesh}>
+          <boxGeometry args={[0.8, 2, 0.8]} />
+          <meshStandardMaterial color="#22d3ee" />
+          <drei.Html position={[0, 0, 0]} center><div style={{fontSize:'20px'}}>🤮</div></drei.Html>
+       </mesh>
+       
+       {/* The Floor */}
+       <mesh ref={floorMesh} rotation={[-Math.PI/2, 0, 0]}>
+          <circleGeometry args={[4, 32]} />
+          <meshStandardMaterial color="#334155" />
+       </mesh>
+    </group>
+    
+    <drei.Grid args={[30, 30]} position={[0, -6, 0]} cellColor="#334155" sectionColor="#475569" />
+  </group>
+);`
+  },
+
+  "gravity assist": {
+    title: "Orbital Slingshot (Gravity Assist)",
+    explanation: "Pilot a spacecraft! Fly close to the moving Jupiter to steal some of its momentum and boost your speed without using fuel.",
+    componentCode: `
+const { launchSpeed, launchAngle } = useControls({
+  launchSpeed: { value: 12, min: 5, max: 20 },
+  launchAngle: { value: 45, min: 0, max: 90 }
+});
+
+const [launched, setLaunched] = useState(false);
+const ship = useRef({ pos: new THREE.Vector3(-15, 0, 5), vel: new THREE.Vector3(0,0,0) });
+const planet = useRef({ pos: new THREE.Vector3(0,0,0), vel: new THREE.Vector3(-3, 0, 0) }); // Planet moves left
+const trail = useRef([]);
+const line = useRef();
+const shipMesh = useRef();
+const planetMesh = useRef();
+
+// Reset logic
+useEffect(() => {
+   if(!launched) {
+      ship.current.pos.set(-15, 0, 5);
+      planet.current.pos.set(10, 0, -2);
+      trail.current = [];
+   }
+}, [launched]);
+
+useControls({ "LAUNCH 🚀": button(() => {
+   const rad = launchAngle * Math.PI / 180;
+   ship.current.vel.set(Math.cos(rad) * launchSpeed, 0, -Math.sin(rad) * launchSpeed);
+   setLaunched(true);
+})});
+
+useControls({ "RESET": button(() => setLaunched(false)) });
+
+useFrame((_, dt) => {
+   if (!launched) return;
+   
+   const G = 50; // Strong gravity for effect
+   const dtSim = Math.min(dt, 0.02);
+   
+   // Move Planet
+   planet.current.pos.x += -3 * dtSim; // Planet moves constant speed
+   
+   // Gravity Calculation
+   const distVec = new THREE.Vector3().subVectors(planet.current.pos, ship.current.pos);
+   const r = distVec.length();
+   
+   if (r > 1) { // Collision guard
+      const force = distVec.normalize().multiplyScalar(G / (r*r));
+      ship.current.vel.add(force.multiplyScalar(dtSim));
+   }
+   
+   // Move Ship
+   ship.current.pos.add(ship.current.vel.clone().multiplyScalar(dtSim));
+   
+   // Update Visuals
+   if(shipMesh.current) shipMesh.current.position.copy(ship.current.pos);
+   if(planetMesh.current) planetMesh.current.position.copy(planet.current.pos);
+   
+   // Trail
+   if (trail.current.length < 500) {
+      trail.current.push(ship.current.pos.x, ship.current.pos.y, ship.current.pos.z);
+      if(line.current) {
+         line.current.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(trail.current), 3));
+         line.current.geometry.setDrawRange(0, trail.current.length/3);
+         line.current.geometry.attributes.position.needsUpdate = true;
+      }
+   }
+});
+
+return (
+  <group>
+     {/* Ship */}
+     <mesh ref={shipMesh} position={[-15, 0, 5]}>
+        <coneGeometry args={[0.5, 1.5, 4]} rotation={[Math.PI/2, 0, 0]} />
+        <meshStandardMaterial color="#facc15" />
+     </mesh>
+     
+     {/* Planet */}
+     <mesh ref={planetMesh} position={[10, 0, -2]}>
+        <sphereGeometry args={[2]} />
+        <meshStandardMaterial color="#ef4444" />
+        <mesh scale={[1.5, 0.1, 1.5]}><ringGeometry args={[2.5, 4, 32]} /><meshBasicMaterial color="#ef4444" side={THREE.DoubleSide} opacity={0.5} transparent /></mesh>
+     </mesh>
+     
+     <line ref={line}><bufferGeometry /><lineBasicMaterial color="white" /></line>
+     <drei.Grid args={[50, 50]} position={[0, -2, 0]} cellColor="#334155" sectionColor="#475569" />
+  </group>
+);`
+  },
+
+  "electric hockey": {
+    title: "Electric Field Hockey",
+    explanation: "Steer the positive charge (Yellow) into the goal (Green) using repelling forces from the blue charges. Drag the blue charges to guide the path!",
+    componentCode: `
+// Game State
+const [puck, setPuck] = useState({ pos: new THREE.Vector3(-8, 0, 0), vel: new THREE.Vector3(0,0,0), active: false });
+// Draggable Obstacles (Positive Charges)
+const [obstacles, setObstacles] = useState([
+  { id: 1, pos: [-2, 0, 2] },
+  { id: 2, pos: [0, 0, -2] },
+  { id: 3, pos: [3, 0, 3] }
+]);
+const [draggingId, setDraggingId] = useState(null);
+
+const { raycaster, camera, pointer, controls } = useThree();
+const puckMesh = useRef();
+
+// Controls
+useControls({ "START": button(() => setPuck(p => ({ ...p, active: true })) ) });
+useControls({ "RESET": button(() => setPuck({ pos: new THREE.Vector3(-8, 0, 0), vel: new THREE.Vector3(0,0,0), active: false })) });
+
+useFrame((_, dt) => {
+   if (!puck.active) return;
+   const subSteps = 5;
+   const dtSim = Math.min(dt, 0.05) / subSteps;
+   
+   for(let s=0; s<subSteps; s++) {
+      // Calculate Force from all obstacles
+      // F = k * q1 * q2 / r^2
+      const force = new THREE.Vector3(0,0,0);
+      obstacles.forEach(obs => {
+         const obsPos = new THREE.Vector3(obs.pos[0], 0, obs.pos[2]);
+         const dir = puck.pos.clone().sub(obsPos);
+         const dist = dir.length();
+         if (dist > 0.5) {
+            dir.normalize().multiplyScalar(20 / (dist * dist)); // Repulsion
+            force.add(dir);
+         }
+      });
+      
+      // Update Physics
+      puck.vel.add(force.multiplyScalar(dtSim));
+      puck.vel.multiplyScalar(0.99); // Friction
+      puck.pos.add(puck.vel.clone().multiplyScalar(dtSim));
+   }
+   
+   if (puckMesh.current) puckMesh.current.position.copy(puck.pos);
+});
+
+// Drag Logic
+const handlePointerMove = (e) => {
+   if (draggingId) {
+      raycaster.setFromCamera(pointer, camera);
+      const target = new THREE.Vector3();
+      raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), target);
+      setObstacles(prev => prev.map(o => o.id === draggingId ? { ...o, pos: [target.x, 0, target.z] } : o));
+   }
+};
+
+const handleDown = (e, id) => { e.stopPropagation(); setDraggingId(id); if(controls) controls.enabled = false; };
+const handleUp = () => { setDraggingId(null); if(controls) controls.enabled = true; };
+
+return (
+  <group onPointerMove={handlePointerMove} onPointerUp={handleUp}>
+     {/* Goal */}
+     <mesh position={[8, 0, 0]} rotation={[-Math.PI/2, 0, 0]}>
+        <ringGeometry args={[1, 1.2, 32]} />
+        <meshBasicMaterial color="#22c55e" />
+        <drei.Html position={[0,0,0]}><div style={{color:'#22c55e', fontWeight:'bold'}}>GOAL</div></drei.Html>
+     </mesh>
+     
+     {/* Puck */}
+     <mesh ref={puckMesh} position={[-8, 0, 0]}>
+        <sphereGeometry args={[0.4]} />
+        <meshStandardMaterial color="#facc15" emissive="#facc15" emissiveIntensity={0.5} />
+        <drei.Html position={[0,0.6,0]}><div style={{color:'#facc15'}}>+</div></drei.Html>
+     </mesh>
+     
+     {/* Obstacles */}
+     {obstacles.map(obs => (
+        <mesh 
+           key={obs.id} 
+           position={[obs.pos[0], 0, obs.pos[2]]}
+           onPointerDown={(e) => handleDown(e, obs.id)}
+           onPointerOver={() => document.body.style.cursor = 'move'}
+           onPointerOut={() => document.body.style.cursor = 'auto'}
+        >
+           <sphereGeometry args={[0.6]} />
+           <meshStandardMaterial color="#3b82f6" />
+           <drei.Html position={[0,0.8,0]}><div style={{color:'#3b82f6'}}>+</div></drei.Html>
+        </mesh>
+     ))}
+     
+     <mesh rotation={[-Math.PI/2, 0, 0]} position={[0, -0.1, 0]}>
+        <planeGeometry args={[20, 10]} />
+        <meshStandardMaterial color="#1e293b" />
+     </mesh>
+  </group>
+);`
+  },
+
+  "mass spec": {
+    title: "Mass Spectrometer",
+    explanation: "Particles separate based on mass! In a magnetic field, the radius of curvature $r = mv/qB$ depends on mass. Heavier isotopes take wider turns.",
+    componentCode: `
+const { bField, eField } = useControls({
+  bField: { value: 1.5, min: 0.5, max: 3, label: "Magnetic Field (B)" },
+  eField: { value: 2, min: 1, max: 5, label: "Accel Voltage" }
+});
+
+const particles = useRef([]);
+const mesh = useRef();
+const dummy = useMemo(() => new THREE.Object3D(), []);
+
+// Spawn particles continuously
+useFrame(({ clock }, dt) => {
+   const t = clock.elapsedTime;
+   if (Math.random() > 0.8) {
+      // Randomly spawn Light (mass=1) or Heavy (mass=2) isotope
+      const isHeavy = Math.random() > 0.5;
+      particles.current.push({
+         pos: new THREE.Vector3(-10, 0, 0),
+         vel: new THREE.Vector3(eField, 0, 0), // Initial push
+         mass: isHeavy ? 2.5 : 1.5,
+         color: isHeavy ? new THREE.Color("#ef4444") : new THREE.Color("#22d3ee"),
+         life: 5
+      });
+   }
+   
+   let count = 0;
+   particles.current.forEach((p, i) => {
+      if (p.life <= 0) return;
+      count++;
+      p.life -= dt;
+      
+      // Physics: Lorentz Force F = q(v x B)
+      // Since v is in XZ plane and B is Y, Force is perpendicular to v
+      // This creates circular motion.
+      // a = (q/m) * (v x B)
+      
+      const q = 5;
+      const speed = p.vel.length();
+      const radius = (p.mass * speed) / (q * bField);
+      
+      // We can simulate this analytically as a turn, or stepwise
+      // Stepwise for simplicity:
+      const forceDir = new THREE.Vector3(-p.vel.z, 0, p.vel.x).normalize(); // Perpendicular
+      const forceMag = q * speed * bField;
+      const accel = forceDir.multiplyScalar(forceMag / p.mass);
+      
+      p.vel.add(accel.multiplyScalar(dt));
+      p.pos.add(p.vel.clone().multiplyScalar(dt));
+      
+      // Update Instance
+      dummy.position.copy(p.pos);
+      dummy.scale.setScalar(0.3);
+      dummy.updateMatrix();
+      mesh.current.setMatrixAt(i, dummy.matrix);
+      mesh.current.setColorAt(i, p.color);
+   });
+   
+   mesh.current.instanceMatrix.needsUpdate = true;
+   mesh.current.instanceColor.needsUpdate = true;
+   
+   // Cleanup dead
+   particles.current = particles.current.filter(p => p.life > 0);
+});
+
+return (
+  <group>
+     <instancedMesh ref={mesh} args={[null, null, 200]}>
+        <sphereGeometry />
+        <meshBasicMaterial />
+     </instancedMesh>
+     
+     {/* Source */}
+     <mesh position={[-11, 0, 0]} rotation={[0,0,-Math.PI/2]}><cylinderGeometry args={[0.5, 0.5, 2]} /><meshStandardMaterial color="gray" /></mesh>
+     
+     {/* Detector Screen */}
+     <mesh position={[0, 0, -5]} rotation={[0, 0, 0]}><boxGeometry args={[15, 2, 0.5]} /><meshStandardMaterial color="#334155" /></mesh>
+     
+     <drei.Text position={[0, 3, 0]} rotation={[-Math.PI/2, 0, 0]} fontSize={1} color="#475569">B-Field Region (Up)</drei.Text>
+     <drei.Grid args={[30, 20]} position={[0, -0.5, 0]} cellColor="#334155" sectionColor="#475569" />
+  </group>
+);`
+  },
+
+  "wave machine": {
+    title: "Transverse Wave Machine",
+    explanation: "A chain of coupled oscillators. Moving the first bead sends a pulse down the line. Notice how each bead only moves up and down, but the wave energy moves forward.",
+    componentCode: `
+const { frequency, tension, damping } = useControls({
+  frequency: { value: 2, min: 0, max: 5 },
+  tension: { value: 0.8, min: 0.1, max: 1 },
+  damping: { value: 0.02, min: 0, max: 0.1 }
+});
+
+const count = 50;
+const beads = useMemo(() => Array.from({length: count}).map(() => ({ y: 0, vel: 0 })), []);
+const mesh = useRef();
+const dummy = useMemo(() => new THREE.Object3D(), []);
+
+useFrame(({ clock }) => {
+   const t = clock.elapsedTime;
+   
+   // Drive the first bead
+   beads[0].y = Math.sin(t * frequency * 5) * 2;
+   
+   // Propagate physics (1D Wave Equation discretized)
+   for (let i = 1; i < count - 1; i++) {
+      // Force from neighbors
+      const force = tension * (beads[i-1].y + beads[i+1].y - 2*beads[i].y);
+      beads[i].vel += force;
+      beads[i].vel *= (1 - damping);
+      beads[i].y += beads[i].vel;
+   }
+   
+   // Update Visuals
+   for (let i = 0; i < count; i++) {
+      dummy.position.set(i * 0.5 - 12, beads[i].y + 2, 0);
+      dummy.scale.setScalar(0.4);
+      dummy.updateMatrix();
+      mesh.current.setMatrixAt(i, dummy.matrix);
+   }
+   mesh.current.instanceMatrix.needsUpdate = true;
+});
+
+return (
+  <group>
+     <instancedMesh ref={mesh} args={[null, null, count]}>
+        <sphereGeometry />
+        <meshStandardMaterial color="#22d3ee" />
+     </instancedMesh>
+     
+     {/* Connection Lines (Simplified as a single rect for now, purely visual) */}
+     <mesh position={[0, 2, 0]}><boxGeometry args={[25, 0.05, 0.05]} /><meshBasicMaterial color="gray" opacity={0.2} transparent /></mesh>
+     
+     <drei.Grid args={[30, 10]} position={[0, 0, 0]} cellColor="#334155" sectionColor="#475569" />
+  </group>
+);`
+  },
+
+  "monkey hunter": {
+    title: "Monkey and Hunter",
+    explanation: "Classic Paradox: If you aim directly at a falling target, will you hit it? YES! Because gravity affects the bullet and the monkey equally.",
+    componentCode: `
+const { bulletSpeed, dist } = useControls({
+  bulletSpeed: { value: 15, min: 8, max: 30 },
+  dist: { value: 15, min: 10, max: 20 }
+});
+
+const [fired, setFired] = useState(false);
+const monkey = useRef();
+const bullet = useRef();
+const timer = useRef(0);
+
+// Reset
+useEffect(() => {
+   setFired(false);
+   timer.current = 0;
+   if(monkey.current) monkey.current.position.set(dist, 10, 0);
+   if(bullet.current) bullet.current.position.set(0, 0, 0);
+}, [dist, bulletSpeed]);
+
+useControls({ "FIRE!": button(() => setFired(true)) });
+useControls({ "RESET": button(() => setFired(false)) });
+
+useFrame((_, dt) => {
+   // Aim Vector Calculation
+   // Aiming at (dist, 10) from (0,0)
+   const dx = dist;
+   const dy = 10;
+   const angle = Math.atan2(dy, dx);
+   
+   // Visualize Aim Line
+   // (Omitted for brevity, but the bullet follows this initial vector)
+   
+   if (fired) {
+      timer.current += dt;
+      const t = timer.current;
+      const g = 9.8;
+      
+      // Monkey: Freefall from (dist, 10)
+      // y = y0 - 0.5gt^2
+      const my = 10 - 0.5 * g * t * t;
+      if (monkey.current) monkey.current.position.set(dist, Math.max(0, my), 0);
+      
+      // Bullet: Projectile
+      // x = v*cos(theta)*t
+      // y = v*sin(theta)*t - 0.5gt^2
+      const bx = bulletSpeed * Math.cos(angle) * t;
+      const by = bulletSpeed * Math.sin(angle) * t - 0.5 * g * t * t;
+      
+      if (bullet.current) bullet.current.position.set(bx, Math.max(0, by), 0);
+   } else {
+      // Reset positions just in case
+      timer.current = 0;
+      if(monkey.current) monkey.current.position.set(dist, 10, 0);
+      if(bullet.current) bullet.current.position.set(0, 0, 0);
+   }
+});
+
+return (
+  <group>
+     {/* Hunter/Cannon */}
+     <mesh position={[0, 0, 0]} rotation={[0,0,Math.atan2(10,dist)]}>
+        <boxGeometry args={[2, 0.5, 0.5]} />
+        <meshStandardMaterial color="#475569" />
+     </mesh>
+     
+     {/* Bullet */}
+     <mesh ref={bullet}><sphereGeometry args={[0.3]} /><meshStandardMaterial color="black" /></mesh>
+     
+     {/* Monkey */}
+     <mesh ref={monkey} position={[dist, 10, 0]}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color="#f59e0b" />
+        <drei.Html position={[0, 1, 0]} center><div style={{fontSize:'20px'}}>🐵</div></drei.Html>
+     </mesh>
+     
+     {/* Aim Line */}
+     <line>
+        <bufferGeometry>
+           <bufferAttribute attach="attributes-position" count={2} array={new Float32Array([0,0,0, dist,10,0])} itemSize={3} />
+        </bufferGeometry>
+        <lineBasicMaterial color="red" dashSize={0.5} gapSize={0.2} />
+     </line>
+     
+     <drei.Grid args={[40, 20]} position={[0, -0.5, 0]} cellColor="#334155" sectionColor="#475569" />
+  </group>
+);`
+  },
+
+  "buoyancy lab": {
+    title: "Buoyancy Lab",
+    explanation: "Experiment with density! Objects with density < 1.0 (water) float. Throw them in and watch the splash.",
+    componentCode: `
+const { woodDensity, brickDensity } = useControls({
+  woodDensity: { value: 0.6, min: 0.1, max: 0.9, label: "Wood Density" },
+  brickDensity: { value: 2.5, min: 1.1, max: 5.0, label: "Brick Density" }
+});
+
+// Physics State [y, vy]
+const wood = useRef({ y: 5, vy: 0 });
+const brick = useRef({ y: 5, vy: 0 });
+const woodMesh = useRef();
+const brickMesh = useRef();
+
+const updatePhysics = (obj, density, dt) => {
+   const g = 9.8;
+   const fluidDensity = 1.0;
+   const drag = 2.0;
+   
+   // Forces
+   let fBuoyancy = 0;
+   let fDrag = 0;
+   
+   // Submerged logic
+   if (obj.y < 0) { // Water level 0
+      // Fully submerged (simplified)
+      const submergedVol = 1.0; 
+      fBuoyancy = submergedVol * fluidDensity * g;
+      fDrag = -obj.vy * drag;
+   } else if (obj.y < 1) {
+      // Partially submerged
+      const submergedVol = (1 - obj.y);
+      fBuoyancy = submergedVol * fluidDensity * g;
+      fDrag = -obj.vy * drag * submergedVol;
+   }
+   
+   const weight = -density * g;
+   const accel = (weight + fBuoyancy + fDrag) / density;
+   
+   obj.vy += accel * dt;
+   obj.y += obj.vy * dt;
+   
+   // Floor constraint
+   if (obj.y < -4) { obj.y = -4; obj.vy = 0; }
+};
+
+useFrame((_, dt) => {
+   const simDt = Math.min(dt, 0.02);
+   updatePhysics(wood.current, woodDensity, simDt);
+   updatePhysics(brick.current, brickDensity, simDt);
+   
+   if(woodMesh.current) woodMesh.current.position.y = wood.current.y;
+   if(brickMesh.current) brickMesh.current.position.y = brick.current.y;
+});
+
+// Reset
+useControls({ "Reset Blocks": button(() => { wood.current = {y:5, vy:0}; brick.current = {y:5, vy:0}; }) });
+
+return (
+  <group>
+     {/* Water */}
+     <mesh position={[0, -2.5, 0]}>
+        <boxGeometry args={[10, 5, 5]} />
+        <meshPhysicalMaterial color="#3b82f6" transmission={0.8} opacity={0.6} transparent />
+     </mesh>
+     
+     {/* Wood Block */}
+     <mesh ref={woodMesh} position={[-2, 5, 0]}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color="#d97706" />
+        <drei.Html><div style={{color:'white', fontWeight:'bold'}}>Wood</div></drei.Html>
+     </mesh>
+     
+     {/* Brick Block */}
+     <mesh ref={brickMesh} position={[2, 5, 0]}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color="#7f1d1d" />
+        <drei.Html><div style={{color:'white', fontWeight:'bold'}}>Brick</div></drei.Html>
+     </mesh>
+     
+     <drei.Grid args={[20, 20]} position={[0, -5, 0]} cellColor="#334155" sectionColor="#475569" />
+  </group>
+);`
+  },
+
+  "cyclotron": {
+    title: "Cyclotron Accelerator",
+    explanation: "Particles spiral outward as they accelerate across the gap between the two 'D' electrodes.",
+    componentCode: `
+const { voltage, bField } = useControls({
+  voltage: { value: 0.5, min: 0.1, max: 2, label: "Gap Voltage" },
+  bField: { value: 1, min: 0.5, max: 2, label: "Magnetic Field" }
+});
+
+const particle = useRef({ pos: new THREE.Vector3(0,0,0), vel: new THREE.Vector3(0.5,0,0) });
+const mesh = useRef();
+const trail = useRef([]);
+const line = useRef();
+
+useControls({ "Restart": button(() => { particle.current = { pos: new THREE.Vector3(0,0,0), vel: new THREE.Vector3(0.5,0,0) }; trail.current=[]; }) });
+
+useFrame((_, dt) => {
+   const p = particle.current;
+   const simDt = Math.min(dt, 0.02);
+   
+   // Physics
+   const speed = p.vel.length();
+   const r = speed / bField; // r = mv/qB (m=1, q=1)
+   
+   // Circular motion (rotate velocity vector)
+   const angle = (speed / r) * simDt;
+   p.vel.applyAxisAngle(new THREE.Vector3(0,1,0), angle);
+   p.pos.add(p.vel.clone().multiplyScalar(simDt));
+   
+   // Acceleration across gap (x=0)
+   // If crossing x=0 (small slice), boost speed
+   if (Math.abs(p.pos.x) < 0.05) {
+      // Add energy in direction of motion
+      p.vel.multiplyScalar(1 + voltage * 0.02);
+   }
+   
+   if(mesh.current) mesh.current.position.copy(p.pos);
+   
+   // Trail
+   if(trail.current.length < 1000) {
+      trail.current.push(p.pos.x, p.pos.y, p.pos.z);
+      if(line.current) {
+         line.current.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(trail.current), 3));
+         line.current.geometry.setDrawRange(0, trail.current.length/3);
+         line.current.geometry.attributes.position.needsUpdate = true;
+      }
+   }
+});
+
+return (
+  <group>
+     {/* Electrodes (Dees) */}
+     <mesh position={[-2.1, 0, 0]} rotation={[Math.PI/2, 0, 0]}><cylinderGeometry args={[2, 2, 0.2, 32, 1, false, Math.PI/2, Math.PI]} /><meshStandardMaterial color="#475569" /></mesh>
+     <mesh position={[2.1, 0, 0]} rotation={[Math.PI/2, 0, 0]}><cylinderGeometry args={[2, 2, 0.2, 32, 1, false, -Math.PI/2, Math.PI]} /><meshStandardMaterial color="#475569" /></mesh>
+     
+     <mesh ref={mesh}><sphereGeometry args={[0.15]} /><meshBasicMaterial color="#facc15" /></mesh>
+     <line ref={line}><bufferGeometry /><lineBasicMaterial color="#facc15" /></line>
+     
+     <drei.Grid args={[20, 20]} position={[0, -0.5, 0]} cellColor="#334155" sectionColor="#475569" />
+  </group>
+);`
+  },
+
+  "newtons rings": {
+    title: "Newton's Rings (Interference)",
+    explanation: "Interference pattern created by light reflecting between a spherical surface and a flat glass plate. The rings get closer together further out.",
+    componentCode: `
+const { radius, lambda } = useControls({
+  radius: { value: 50, min: 10, max: 100, label: "Lens Radius (R)" },
+  lambda: { value: 1, min: 0.5, max: 2, label: "Wavelength" }
+});
+
+const geometry = useMemo(() => new THREE.PlaneGeometry(10, 10, 128, 128), []);
+const mesh = useRef();
+
+useFrame(() => {
+   if(!mesh.current) return;
+   
+   const pos = geometry.attributes.position;
+   const colors = [];
+   const center = new THREE.Vector2(0,0);
+   
+   for(let i=0; i<pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i); // Plane is XY
+      
+      const r = Math.sqrt(x*x + y*y);
+      
+      // Thickness t ~ r^2 / 2R
+      const t = (r * r) / (2 * (radius/10)); // Scale factor for visual
+      
+      // Phase difference delta = 2t (approx)
+      // Intensity I ~ cos^2(k * delta)
+      // Color map based on intensity
+      const phase = (2 * Math.PI * 2 * t) / (lambda * 0.1);
+      const intensity = Math.cos(phase) ** 2;
+      
+      const c = new THREE.Color().setHSL(0.6 - intensity * 0.2, 1, intensity);
+      colors.push(c.r, c.g, c.b);
+   }
+   
+   mesh.current.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+   mesh.current.geometry.attributes.color.needsUpdate = true;
+});
+
+return (
+  <group>
+     <mesh ref={mesh} geometry={geometry} rotation={[-Math.PI/2, 0, 0]} position={[0, 0.1, 0]}>
+        <meshBasicMaterial vertexColors />
+     </mesh>
+     
+     {/* Lens Glass Visual */}
+     <mesh position={[0, 1, 0]}>
+        <sphereGeometry args={[5, 64, 16, 0, Math.PI*2, 0, 0.5]} />
+        <meshPhysicalMaterial transmission={0.9} roughness={0} thickness={2} opacity={0.3} transparent />
+     </mesh>
+     
+     <drei.Grid args={[20, 20]} position={[0, 0, 0]} cellColor="#334155" sectionColor="#475569" />
+  </group>
+);`
+  },
+
+  "coupled oscillators": {
+    title: "Coupled Spring Oscillators",
+    explanation: "Energy transfer between two masses connected by a spring. A classic example of 'beating' frequencies.",
+    componentCode: `
+const { kMiddle, kOuter } = useControls({
+  kMiddle: { value: 2, min: 0.1, max: 10, label: "Coupling Spring (k2)" },
+  kOuter: { value: 10, min: 5, max: 20, label: "Wall Springs (k1)" }
+});
+
+const m1 = useRef({ x: -2, v: 0 });
+const m2 = useRef({ x: 2, v: 0 }); // Start displaced
+const mesh1 = useRef();
+const mesh2 = useRef();
+const springL = useRef();
+const springM = useRef();
+const springR = useRef();
+
+// Perturb
+useControls({ "Push Left": button(() => m1.current.v += 5) });
+
+useFrame((_, dt) => {
+   const simDt = Math.min(dt, 0.05);
+   
+   // Forces
+   // F1 = -k1*x1 + k2*(x2 - x1)
+   // F2 = -k1*x2 - k2*(x2 - x1)
+   
+   // Equilibrium positions are -3 and 3
+   const x1 = m1.current.x - (-3);
+   const x2 = m2.current.x - 3;
+   
+   const f1 = -kOuter * x1 + kMiddle * (x2 - x1);
+   const f2 = -kOuter * x2 - kMiddle * (x2 - x1);
+   
+   // Integrate
+   m1.current.v += f1 * simDt;
+   m2.current.v += f2 * simDt;
+   
+   // Damping
+   m1.current.v *= 0.999;
+   m2.current.v *= 0.999;
+   
+   m1.current.x += m1.current.v * simDt;
+   m2.current.x += m2.current.v * simDt;
+   
+   // Visuals
+   if(mesh1.current) mesh1.current.position.x = m1.current.x;
+   if(mesh2.current) mesh2.current.position.x = m2.current.x;
+   
+   // Update springs
+   const updateSpring = (ref, xA, xB) => {
+      if(!ref.current) return;
+      const pts = new Float32Array([-10,0,0, -5,0,0]); // Dummy
+      // Actual drawing requires creating geometry every frame or scaling a cylinder
+      // For speed, let's just scale cylinders
+      const dist = xB - xA;
+      ref.current.position.x = (xA + xB) / 2;
+      ref.current.scale.y = dist; // We'll rotate z=90
+   };
+   
+   updateSpring(springL, -8, m1.current.x);
+   updateSpring(springM, m1.current.x, m2.current.x);
+   updateSpring(springR, m2.current.x, 8);
+});
+
+return (
+  <group>
+     {/* Walls */}
+     <mesh position={[-8, 1, 0]}><boxGeometry args={[0.5, 2, 2]} /><meshStandardMaterial color="#475569" /></mesh>
+     <mesh position={[8, 1, 0]}><boxGeometry args={[0.5, 2, 2]} /><meshStandardMaterial color="#475569" /></mesh>
+     
+     {/* Masses */}
+     <mesh ref={mesh1} position={[-3, 1, 0]}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#22d3ee" /></mesh>
+     <mesh ref={mesh2} position={[3, 1, 0]}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#f472b6" /></mesh>
+     
+     {/* Springs (Visualized as thin cylinders) */}
+     <mesh ref={springL} position={[-5.5, 1, 0]} rotation={[0,0,Math.PI/2]}><cylinderGeometry args={[0.1, 0.1, 1]} /><meshStandardMaterial color="white" /></mesh>
+     <mesh ref={springM} position={[0, 1, 0]} rotation={[0,0,Math.PI/2]}><cylinderGeometry args={[0.1, 0.1, 1]} /><meshStandardMaterial color="white" /></mesh>
+     <mesh ref={springR} position={[5.5, 1, 0]} rotation={[0,0,Math.PI/2]}><cylinderGeometry args={[0.1, 0.1, 1]} /><meshStandardMaterial color="white" /></mesh>
+     
+     <drei.Grid args={[20, 10]} position={[0, 0, 0]} cellColor="#334155" sectionColor="#475569" />
+  </group>
+);`
   }
 };

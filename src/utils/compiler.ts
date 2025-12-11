@@ -19,15 +19,10 @@ export const compileComponent = (
     let cleanBody = codeBody.trim();
 
     // 1. Aggressively remove Import statements (Global regex, case insensitive, multiline support)
-    //    Matches "import ... from ...;" or "import ...;"
     cleanBody = cleanBody.replace(/^\s*import\s+[\s\S]*?;\s*$/gm, '');
-    //    Fallback for imports without semicolons at end of line
     cleanBody = cleanBody.replace(/^\s*import\s+.*$/gm, '');
 
     // 2. Determine Compilation Strategy
-    //    Strategy A: Full Module (The AI output a complete file with "export default")
-    //    Strategy B: Hook Body (The AI output just the inside of a component)
-    
     let sourceCode = '';
     let returnStatement = '';
     
@@ -35,31 +30,22 @@ export const compileComponent = (
 
     if (hasExportDefault) {
       // STRATEGY A: Handle Full Module
-      // We want to execute this code in the function scope, NOT wrapped in another component.
-      
-      // Check for: "export default function Name"
       const funcMatch = cleanBody.match(/export\s+default\s+function\s+([a-zA-Z0-9_]+)/);
-      // Check for: "export default Name" (where Name is defined earlier)
       const varMatch = cleanBody.match(/export\s+default\s+([a-zA-Z0-9_]+)/);
       
       if (funcMatch) {
-        // Replace "export default function Foo" with "function Foo"
         cleanBody = cleanBody.replace(/export\s+default\s+function/, 'function');
         returnStatement = `return ${funcMatch[1]};`;
       } else if (varMatch) {
-        // Replace "export default Foo" with empty string (Foo is already defined)
         cleanBody = cleanBody.replace(/export\s+default\s+[a-zA-Z0-9_]+;?/, '');
         returnStatement = `return ${varMatch[1]};`;
       } else {
-        // Anonymous export: "export default () => {}" -> "const DynamicComponent = () => {}"
         cleanBody = cleanBody.replace(/export\s+default\s+/, 'const DynamicComponent = ');
         returnStatement = `return DynamicComponent;`;
       }
-      
       sourceCode = cleanBody;
     } else {
       // STRATEGY B: Handle Body Only
-      // Wrap the loose code in a component function
       sourceCode = `
         const DynamicComponent = (props) => {
           ${cleanBody}
@@ -73,13 +59,12 @@ export const compileComponent = (
       throw new Error("Babel not loaded");
     }
 
-    // We must try-catch the transform separately to identify syntax errors in generation
     let transformed;
     try {
       transformed = window.Babel.transform(sourceCode, {
         presets: ['react', 'env'],
         filename: 'dynamic.js',
-        compact: false, // Easier debugging
+        compact: false,
       }).code;
     } catch (babelErr) {
       console.error("Babel Transform Failed on:", sourceCode);
@@ -87,7 +72,6 @@ export const compileComponent = (
     }
 
     // 4. Create a Function that returns the component.
-    //    We explicitly destructure global hooks so the AI code (which assumes global scope or named imports) works.
     const createComponent = new Function(
       'React',
       'THREE',
@@ -106,6 +90,13 @@ export const compileComponent = (
       
       // Inject Leva Hooks into Top-Level Scope
       const { useControls, button, folder, monitor } = leva;
+
+      // Inject Common Drei Components into Top-Level Scope (FIX FOR HTML ERROR)
+      const { 
+        Html, Text, Text3D, Float, Center, 
+        OrbitControls, Environment, ContactShadows, 
+        PerspectiveCamera, OrthographicCamera 
+      } = drei;
       
       ${transformed}
       

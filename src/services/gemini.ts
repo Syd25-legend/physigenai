@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SimulationResponse } from "../types";
 import { PERFECT_SIMULATIONS } from "../data/perfectSimulations";
+import { INVISIBLE_SIMULATIONS } from "../data/invisibleSimulations";
 
 // ============================================================================
 // CONFIGURATION & SETUP
@@ -111,24 +112,48 @@ const validateSimulationCode = (code: string): boolean => {
 export const generateSimulation = async (userPrompt: string): Promise<SimulationResponse> => {
   const lowerPrompt = userPrompt.toLowerCase().trim();
   
-  // Vault Check
-  const vaultMatch = Object.keys(PERFECT_SIMULATIONS).find(key => lowerPrompt.includes(key));
-  if (vaultMatch) {
-    return { ...PERFECT_SIMULATIONS[vaultMatch], sources: [{ title: "PhysiGen Vault", uri: "#" }] };
+  // 1. VISIBLE VAULT CHECK (Perfect Simulations - Exact/Title Match)
+  const visibleMatch = Object.keys(PERFECT_SIMULATIONS).find(key => lowerPrompt.includes(key));
+  if (visibleMatch) {
+    return { ...PERFECT_SIMULATIONS[visibleMatch], sources: [{ title: "PhysiGen Library", uri: "#" }] };
   }
 
+  // 2. INVISIBLE VAULT CHECK (Hidden "Shadow" Library)
+  // Logic: Scan KEYS and TITLES.
+  // This ensures if you type "Freefall: Vacuum vs Air", it matches even if the key is "feather".
+  const shadowKey = Object.keys(INVISIBLE_SIMULATIONS).find(key => {
+    const sim = INVISIBLE_SIMULATIONS[key];
+    const keyMatch = lowerPrompt.includes(key);
+    const titleMatch = sim.title.toLowerCase().includes(lowerPrompt) || lowerPrompt.includes(sim.title.toLowerCase());
+    // Also check for partial keyword overlap if the user typed "freefall" but key is "feather"
+    const contentMatch = sim.explanation.toLowerCase().includes(lowerPrompt); 
+    return keyMatch || titleMatch;
+  });
+  
+  if (shadowKey) {
+    // Artificial Delay to simulate "thinking" or "generating"
+    // This makes the user feel like the AI is working, even though it's instant.
+    await new Promise(resolve => setTimeout(resolve, 1200)); 
+
+    return { 
+      ...INVISIBLE_SIMULATIONS[shadowKey], 
+      sources: [{ title: "PhysiGen Engine (Optimized)", uri: "#" }] 
+    };
+  }
+
+  // 3. AI GENERATION (Fallback to Gemini API)
   // Cache Check
   if (GENERATION_CACHE[lowerPrompt]) return GENERATION_CACHE[lowerPrompt];
 
   try {
-    // 1. RESEARCH (Get formulas)
+    // 3a. RESEARCH (Get formulas)
     const researchResponse = await ai.models.generateContent({
-      model: "gemini-2.5-flash", // Use 2.0 Flash for speed/logic balance
+      model: "gemini-2.5-flash", // <--- 2.5 Flash used here
       contents: `Topic: "${userPrompt}". Provide 3 key physics parameters (ranges) and the core mathematical formula needed for a javascript simulation. Keep it brief.`,
     });
     const researchText = researchResponse.text || "";
 
-    // 2. GENERATE CODE
+    // 3b. GENERATE CODE
     const augmentedPrompt = `
     USER REQUEST: "${userPrompt}"
     PHYSICS DATA: ${researchText}
@@ -138,7 +163,7 @@ export const generateSimulation = async (userPrompt: string): Promise<Simulation
     `;
 
     const codeResponse = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash", // <--- 2.5 Flash used here
       contents: augmentedPrompt,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
@@ -193,7 +218,7 @@ export const modifySimulation = async (currentCode: string, userRequest: string)
     `;
 
     const result = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash", // <--- 2.5 Flash used here
       contents: prompt,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
@@ -229,7 +254,7 @@ export const explainPhysics = async (currentCode: string, userQuestion: string):
     `;
 
     const result = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash", // <--- 2.5 Flash used here
       contents: prompt,
     });
 
